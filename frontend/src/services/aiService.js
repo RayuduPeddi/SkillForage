@@ -1,4 +1,5 @@
-import { delay } from './api';
+import { apiClient, delay } from './api';
+import { APP_CONFIG } from '../constants/config';
 import { storage } from '../utils/storage';
 
 const SESSIONS_KEY = 'ai_mentor_sessions';
@@ -140,8 +141,6 @@ export const aiService = {
   },
 
   async sendMessage(userMessage, context = {}, replyToMessage = null, persona = 'direct', codeAttachment = null) {
-    await delay(450); // realistic typing simulation
-
     const sessions = storage.get(SESSIONS_KEY) || DEFAULT_SESSIONS;
     const activeId = storage.get(ACTIVE_SESSION_KEY) || sessions[0]?.id;
     const currentSession = sessions.find((s) => s.id === activeId) || sessions[0];
@@ -160,6 +159,53 @@ export const aiService = {
         : null,
       codeAttachment,
     };
+
+    if (!APP_CONFIG.useMockApi) {
+      const apiPayload = {
+        message: userMessage,
+        context,
+        replyTo: userMsgObj.replyTo,
+        persona,
+        codeAttachment,
+      };
+
+      const backendResponse = await apiClient.post('/ai-chat', apiPayload);
+      const aiResponseText = backendResponse?.reply || 'AI Mentor did not return a response.';
+
+      const aiMsgObj = {
+        id: `msg_ai_${Date.now()}`,
+        sender: 'ai',
+        text: aiResponseText,
+        timestamp: new Date().toISOString(),
+        adaptiveContext: {
+          topic: context.currentTopic || currentSession.topic || 'Prefix Sum',
+          mastery: `${context.overallMastery || 43}%`,
+          difficulty: `Adaptive • ${persona.toUpperCase()}`,
+        },
+        interactiveQuiz: null,
+        suggestedActions: [
+          '💡 Show me the Code Proof',
+          '🧪 Generate another Mini-Quiz',
+          '🔍 Explain Intuition like I am 5',
+        ],
+      };
+
+      const updatedSessions = sessions.map((sess) => {
+        if (sess.id === currentSession.id) {
+          return {
+            ...sess,
+            updatedAt: new Date().toISOString(),
+            messages: [...sess.messages, userMsgObj, aiMsgObj],
+          };
+        }
+        return sess;
+      });
+
+      storage.set(SESSIONS_KEY, updatedSessions);
+      return { userMsg: userMsgObj, aiMsg: aiMsgObj, sessionId: currentSession.id };
+    }
+
+    await delay(450); // realistic typing simulation
 
     let aiResponseText = '';
     let interactiveQuiz = null;
